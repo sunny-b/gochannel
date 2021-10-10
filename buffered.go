@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-type SyncChan struct {
-	val         *interface{}
+type BufferedChannel struct {
+	buf         Buffer
 	lock        sync.Mutex
 	closed      bool
 	sendQ       *list.List
@@ -17,22 +17,22 @@ type SyncChan struct {
 	recvCounter int32
 }
 
-func (c *SyncChan) Close() {
+func (c *BufferedChannel) Close() {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	c.closed = true
 }
 
-func (c *SyncChan) Next() bool {
+func (c *BufferedChannel) Next() bool {
 	defer c.lock.Unlock()
 	for {
 		c.lock.Lock()
 
-		if c.closed && c.val == nil {
+		if c.closed && c.buf.IsEmpty() {
 			return false
 		}
-		if c.val != nil {
+		if !c.buf.IsEmpty() {
 			return true
 		}
 
@@ -41,7 +41,7 @@ func (c *SyncChan) Next() bool {
 	}
 }
 
-func (c *SyncChan) Send(val interface{}) {
+func (c *BufferedChannel) Send(val interface{}) {
 	if c.closed {
 		panic("channel closed")
 	}
@@ -49,8 +49,8 @@ func (c *SyncChan) Send(val interface{}) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if c.val == nil {
-		c.val = &val
+	if !c.buf.IsFull() {
+		c.buf.Enqueue(val)
 		return
 	}
 
@@ -71,22 +71,19 @@ func (c *SyncChan) Send(val interface{}) {
 	}
 
 	c.sendQ.Remove(c.sendQ.Front())
-	c.val = &val
+	c.buf.Enqueue(val)
 }
 
-func (c *SyncChan) Recv() (interface{}, bool) {
+func (c *BufferedChannel) Recv() (interface{}, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if c.val == nil && c.closed {
+	if c.buf.IsEmpty() && c.closed {
 		return nil, false
 	}
 
-	if c.val != nil {
-		val := *c.val
-		c.val = nil
-
-		return val, true
+	if !c.buf.IsEmpty() {
+		return c.buf.Dequeue(), true
 	}
 
 	ticket := atomic.AddInt32(&c.recvCounter, 1)
@@ -97,11 +94,11 @@ func (c *SyncChan) Recv() (interface{}, bool) {
 	for {
 		c.lock.Lock()
 
-		if c.val == nil && c.closed {
+		if c.buf.IsEmpty() && c.closed {
 			return nil, false
 		}
 
-		if c.val != nil && ticket == c.recvQ.Front().Value.(int32) {
+		if !c.buf.IsEmpty() && ticket == c.recvQ.Front().Value.(int32) {
 			break
 		}
 
@@ -109,10 +106,6 @@ func (c *SyncChan) Recv() (interface{}, bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	val := *c.val
-	c.val = nil
-
 	c.recvQ.Remove(c.recvQ.Front())
-
-	return val, true
+	return c.buf.Dequeue(), true
 }

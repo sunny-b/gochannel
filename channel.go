@@ -60,15 +60,15 @@ func NewChannel(size int, opts ...Option) Channel {
 	}
 
 	if size > 0 {
-		return &AsyncChan{
+		return &BufferedChannel{
 			buf:   o.buffer,
-			sendq: new(list.List).Init(),
-			recvq: new(list.List).Init(),
+			sendQ: new(list.List).Init(),
+			recvQ: new(list.List).Init(),
 		}
 	}
 
 	return &SyncChan{
-		sendq: new(list.List).Init(),
-		recvq: new(list.List).Init(),
+		sendQ: new(list.List).Init(),
+		recvQ: new(list.List).Init(),
 	}
 }
